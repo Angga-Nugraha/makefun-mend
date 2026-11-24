@@ -304,12 +304,12 @@ interface Hunk {
 }
 
 interface Section {
-  gitOld: string | null;
-  gitNew: string | null;
-  headerOld: string | null;
-  headerNew: string | null;
-  renameOld: string | null;
-  renameNew: string | null;
+  gitOld: string | null | undefined;
+  gitNew: string | null | undefined;
+  headerOld: string | null | undefined;
+  headerNew: string | null | undefined;
+  renameOld: string | null | undefined;
+  renameNew: string | null | undefined;
   create: boolean;
   del: boolean;
   hunks: Hunk[];
@@ -339,7 +339,7 @@ function parseHeaderPath(l: string): string | null {
 }
 
 function newSection(): Section {
-  return { gitOld: null, gitNew: null, headerOld: null, headerNew: null, renameOld: null, renameNew: null, create: false, del: false, hunks: [] };
+  return { gitOld: undefined, gitNew: undefined, headerOld: undefined, headerNew: undefined, renameOld: undefined, renameNew: undefined, create: false, del: false, hunks: [] };
 }
 
 function parseUnified(lines: string[]): Section[] {
@@ -512,8 +512,8 @@ function unifiedEdits(lines: string[], strict: boolean): Edit[] {
   const sections = parseUnified(lines);
   if (sections.length === 0) throw new Exit2('error: parse 1');
   return sections.map((sec) => {
-    const oldP = sec.headerOld ?? sec.renameOld ?? sec.gitOld;
-    const newP = sec.headerNew ?? sec.renameNew ?? sec.gitNew;
+    const oldP = sec.headerOld !== undefined ? sec.headerOld : sec.renameOld !== undefined ? sec.renameOld : sec.gitOld;
+    const newP = sec.headerNew !== undefined ? sec.headerNew : sec.renameNew !== undefined ? sec.renameNew : sec.gitNew;
     return (tree: Tree): void => {
       if (oldP !== null && oldP !== undefined && !safe(oldP)) throw new Fail('unsafe', oldP);
       if (newP !== null && newP !== undefined && !safe(newP)) throw new Fail('unsafe', newP);
@@ -587,7 +587,9 @@ function searchReplaceEdits(lines: string[], strict: boolean): Edit[] {
     if (path === null) throw new Exit2(`error: parse ${s + 1}`);
     let eq = -1;
     for (let j = s + 1; j < lines.length; j++) {
-      if (lines[j]!.trimEnd() === '=======') {
+      const t = lines[j]!.trimEnd();
+      if (t === '>>>>>>> REPLACE') throw new Exit2(`error: parse ${s + 1}`);
+      if (t === '=======') {
         eq = j;
         break;
       }
@@ -595,7 +597,9 @@ function searchReplaceEdits(lines: string[], strict: boolean): Edit[] {
     if (eq < 0) throw new Exit2(`error: parse ${s + 1}`);
     let gt = -1;
     for (let j = eq + 1; j < lines.length; j++) {
-      if (lines[j]!.trimEnd() === '>>>>>>> REPLACE') {
+      const t = lines[j]!.trimEnd();
+      if (t === '<<<<<<< SEARCH') throw new Exit2(`error: parse ${s + 1}`);
+      if (t === '>>>>>>> REPLACE') {
         gt = j;
         break;
       }
@@ -704,6 +708,11 @@ function v4aEdits(lines: string[], strict: boolean): Edit[] {
         const ln = bodyStart + k + 1;
         if (blank(b)) {
           if (cur !== null) cur.body.push('');
+          else if (chunks.length === 0) {
+            cur = { anchor: null, eof: false, body: [] };
+            started = true;
+            cur.body.push('');
+          }
           continue;
         }
         if (b.startsWith('*** Move to: ')) {
@@ -712,7 +721,7 @@ function v4aEdits(lines: string[], strict: boolean): Edit[] {
           started = true;
           continue;
         }
-        if (b.trim() === '*** End of File') {
+        if (b === '*** End of File') {
           if (cur === null) throw new Exit2(`error: parse ${ln}`);
           cur.eof = true;
           chunks.push(cur);
@@ -768,12 +777,10 @@ function v4aEdits(lines: string[], strict: boolean): Edit[] {
     const chunks = sec.chunks;
     return (tree: Tree): void => {
       if (!safe(p)) throw new Fail('unsafe', p);
+      if (moveTo !== null && !safe(moveTo)) throw new Fail('unsafe', moveTo);
       const before = tree.get(p);
       if (before === null) throw new Fail('missing', p);
-      if (moveTo !== null) {
-        if (!safe(moveTo)) throw new Fail('unsafe', moveTo);
-        if (tree.get(moveTo) !== null) throw new Fail('exists', moveTo);
-      }
+      if (moveTo !== null && tree.get(moveTo) !== null) throw new Fail('exists', moveTo);
       const parts = fileParts(before);
       const fl = parts.lines;
       let cursor = 0;
